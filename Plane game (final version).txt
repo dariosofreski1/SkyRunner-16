@@ -1,0 +1,319 @@
+; -----------------------------------------------------------------------------
+; Plane game
+; -----------------------------------------------------------------------------
+JMP main
+JMP isr
+
+; -----------------------------------------------------------------------------
+; Global system variables
+; -----------------------------------------------------------------------------
+vsync: DW 0  
+keypress: DW 0  
+keyvalue: DW 0
+    
+plane_position: DW 0x78C2
+view_position: DW 1792
+view_speed: DW 4
+
+cloud: 
+	DW 0x7404
+	DW 0x6612
+    DW 0x5808
+    DW 0x5004
+    DW 0x4210
+    DW 0x3404
+    DW 0x2612
+    DW 0x1804
+
+start_string:
+	DB "[s] to take off"
+    DB 0
+; -----------------------------------------------------------------------------
+; Interrupt Service Routine
+; -----------------------------------------------------------------------------
+; -----------------------------------------------------------------------------
+isr:
+    PUSH A            
+    IN 1             
+    CMP A, 4         
+    JNE isr_keyboard  
+    MOV [vsync], 1  
+    MOV A, 4         
+    OUT 2            
+    JMP isr_return
+isr_keyboard:
+    IN 5             
+    AND A, 1          
+    CMP A, 1          
+    JNE isr_key_clear
+    MOV [keypress], 1 
+isr_key_clear:
+    IN 6 
+    MOV [keyvalue], A
+    MOV A, 1         
+    OUT 2           
+isr_return:
+    POP A
+    IRET
+    
+tile_definitions:
+	 ; outline od avionot (0xF0)
+    DB "\x1F\xF8\x01\x80\x02\x40\x02\x40\x02\x40\x02\x40\x1E\x78\x63\xC6"
+    DB "\x80\x01\x7F\xFE\x02\x40\x02\x40\x02\x40\x04\x20\x02\x40\x01\x80"
+	; crven del od avionot (0xF1)
+    DB "\x00\x00\x00\x00\x01\x80\x00\x00\x01\x80\x01\x80\x01\x80\x00\x00" 
+    DB "\x7F\xFE\x00\x00\x01\x80\x01\x80\x01\x80\x00\x00\x01\x80\x00\x00"
+    
+    ; zholt del od avionot (OxF2)
+    DB "\x00\x00\x00\x00\x00\x00\x01\x80\x00\x00\x00\x00\x00\x00\x1C\x38"
+    DB "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x03\xC0\x00\x00\x00\x00"
+    
+    ; oblaci (OxF3)
+    DB "\x00\x00\x00\x00\x00\x00\x00\x00\x06\x00\x0F\x38\x3F\xFC\x7F\xFE"
+    DB "\x7F\xFE\x7F\xFE\x3F\xFC\x1F\xF8\x03\xE0\x00\x00\x00\x00\x00\x00"
+    
+    
+    
+; -----------------------------------------------------------------------------
+; Function: load_vram_tiles()
+; -----------------------------------------------------------------------------
+load_vram_tiles:
+    MOV C, tile_definitions
+    MOV D, 0x9E00
+load_vram_tiles_loop:
+    CMP D, 0x9E80 
+    JE load_vram_tiles_return
+    MOV A, D     
+    OUT 8         
+    MOV A, [C]    
+    OUT 9
+    ADD C, 2     
+    ADD D, 2      
+    JMP load_vram_tiles_loop
+load_vram_tiles_return:
+    RET
+ 
+    ; -----------------------------------------------------------------------------
+; Function: draw_plane()
+; -----------------------------------------------------------------------------
+draw_plane:
+    MOV B, draw_plane_colors
+    MOV D, 0xA306           
+    MOV C, 3               
+draw_plane_sprite:
+    CMP C, 0               
+    JE draw_plane_return
+    MOV A, D              
+    OUT 8                 
+    MOV A, [B]              
+    OUT 9                  
+    ADD D, 2                
+    MOV A, D                
+    OUT 8                   
+    MOV A, [plane_position] 
+    OUT 9
+    ADD B, 2               
+    ADD D, 2               
+    DEC C                 
+    JMP draw_plane_sprite
+draw_plane_return:
+    RET
+
+		
+draw_plane_colors:
+    DW 0xF000     
+    DW 0xF1C0     
+    DW 0xF2DC
+ 
+  
+;--------------------------------
+; draw cloud function
+; --------------------------------
+draw_cloud:
+	MOV B, cloud
+    MOV C, 8
+draw_loop:
+	CMP C, 0
+    JE draw_cloud_return
+    MOV A, 0
+    MOV A, [B]
+    OUT 8
+    MOV A, 0xF3FF
+    OUT 9
+    DEC C
+   	ADD B, 2
+    JMP draw_loop
+    
+draw_cloud_return:
+	RET
+;-------------------------------------
+;change background function
+;-------------------------------------
+change_background:
+	MOV A, 0xA300
+    OUT 8
+    MOV A, 63
+   	OUT 9
+    
+    RET
+;---------------------------------------------------
+;function to change the location of the starting screen
+;---------------------------------------------------
+start_screen:
+	MOV A, 0xA304
+    OUT 8
+    MOV A, 1792
+    OUT 9
+    RET
+;--------------------------------------------------
+; function to move screen to simulate flying
+;-----------------------------------------
+scroll_screen:
+    MOV B, [view_position] 
+    MOV C, [view_speed]  
+    SUB B, C               
+    CMP B, 0            
+    JA move_view_store    
+    ADD B, 1792           
+move_view_store:
+    MOV [view_position], B 
+    MOV A, 0x0A304        
+    OUT 8                  
+    MOV A, B              
+    OUT 9                  
+move_view_return:
+    RET
+    
+;-------------------------------------
+;wait frames function
+; ------------------------------------
+wait_next_frame:
+    MOV A, [vsync]    
+    CMP A, 0          
+    JE wait_next_frame
+    MOV [vsync], 0     
+    RET
+    
+;---------------------------------------
+;function to move the plane on keypress
+;----------------------------------------
+move_plane:
+	MOV A, [keyvalue]
+    CMPB AL, 'A'
+    JE moveleft
+    CMPB AL, 'a'
+    JE moveleft
+    CMPB AL, 'D'
+    JE moveright
+    CMPB AL, 'd'
+    JE moveright
+    JMP move_return
+moveleft:
+    MOV A, [plane_position]
+    SHL A, 0
+    CMPB AH, 0x10        
+    JB move_return      
+    SUBB AH, 16           
+    SHL A, 0            
+    MOV [plane_position], A
+    JMP move_return
+
+
+moveright:
+    MOV A, [plane_position]
+    SHL A, 0
+    CMPB AH, 0xDC     
+    JA move_return
+    ADDB AH, 16           
+    SHL A, 0
+    MOV [plane_position], A
+    JMP move_return
+
+
+move_return:
+	RET
+
+;------------------------
+;print starting message function
+;------------------------------
+print_message:
+	MOV D, display
+print_message_loop:
+	MOVB BL, [C]
+    CMPB BL, 0
+    JE return_print_message
+    MOVB [D], BL
+    INC C
+    INC D
+    JMP print_message_loop
+return_print_message:
+	RET
+    
+;--------------------------------
+; wait for starting input
+; ---------------------------
+wait_s_key:
+    IN 5         
+    AND A, 1     
+    CMP A, 1
+    JNE wait_s_key
+    IN 6         
+    CMPB AL, 's'
+    JE wait_s_return
+    CMPB AL, 'S'
+    JE wait_s_return
+    JMP wait_s_key
+
+wait_s_return:
+    RET
+
+main:
+	MOV SP, 0x0FDF
+    
+    MOV C, start_string
+    CALL print_message
+    
+    MOV A, 1
+    OUT 7
+
+    CALL wait_s_key
+
+    CALL load_vram_tiles
+	CALL change_background
+    CALL draw_cloud
+    CALL start_screen
+    
+    MOV A, 5
+    OUT 0
+    STI
+    	
+    game_loop:
+    	MOV A, [keypress]
+        CMP A, 0
+        JE skip_key
+    	CALL move_plane
+        MOV [keypress], 0
+	skip_key:        
+    	CALL draw_plane
+    	CALL scroll_screen
+        CALL wait_next_frame
+        JMP game_loop
+
+ORG 0x1000
+display:
+   
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
